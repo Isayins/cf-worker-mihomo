@@ -1,0 +1,6 @@
+wrangler.toml
+.wrangler/
+node_modules/
+*.log
+.env
+secrets/

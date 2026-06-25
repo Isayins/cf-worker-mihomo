@@ -1,0 +1,18 @@
+{
+  "UUID": "replace-with-your-vless-uuid",
+  "HOST": "your-worker-host.example.com",
+  "HOSTS": [
+    "your-worker-host.example.com"
+  ],
+  "Fingerprint": "chrome",
+  "跳过证书验证": false,
+  "启用0RTT": true,
+  "优选订阅生成": {
+    "SUBUpdateTime": 1,
+    "本地IP库": {
+      "随机IP": true,
+      "随机数量": 1024,
+      "指定端口": 443
+    }
+  }
+}
