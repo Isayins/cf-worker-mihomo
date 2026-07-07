@@ -189,12 +189,14 @@ export default {
                     const 响应 = new Response('重定向中...', { status: 302, headers: { 'Location': '/login' } });
                     响应.headers.set('Set-Cookie', 'auth=; Path=/; Max-Age=0; HttpOnly');
                     return 响应;
-                } else if (访问路径 === 'mihomo') {//本地生成 mihomo provider，避免依赖外部订阅转换服务
+                } else if (访问路径 === 'mihomo' || ['mihomo/tw', 'mihomo-tw', 'clash/tw', 'clash-tw'].includes(访问路径)) {//本地生成 mihomo provider，避免依赖外部订阅转换服务
+                    const mihomoURL = new URL(url);
+                    if (访问路径 !== 'mihomo') mihomoURL.searchParams.set('region', 'tw');
                     const 订阅TOKEN = await MD5MD5(host + userID);
-                    if (url.searchParams.get('token') === 订阅TOKEN) {
-                        const mihomo调试 = url.searchParams.get('debug') === '1';
-                        const 跳过mihomo缓存 = mihomo调试 || url.searchParams.get('refresh') === '1';
-                        const mihomo响应缓存KEY = 生成Mihomo响应缓存KEY(url, host);
+                    if (mihomoURL.searchParams.get('token') === 订阅TOKEN) {
+                        const mihomo调试 = mihomoURL.searchParams.get('debug') === '1';
+                        const 跳过mihomo缓存 = mihomo调试 || mihomoURL.searchParams.get('refresh') === '1';
+                        const mihomo响应缓存KEY = 生成Mihomo响应缓存KEY(mihomoURL, host);
                         if (!跳过mihomo缓存) {
                             try {
                                 const cachedMihomo = await caches.default.match(mihomo响应缓存KEY);
@@ -205,9 +207,9 @@ export default {
                         }
                         config_JSON = await 读取config_JSON(env, host, userID, env.PATH);
                         ctx.waitUntil(请求日志记录(env, request, 访问IP, 'Get_Mihomo', config_JSON));
-                        const 完整优选IP = await 获取Mihomo优选IP(env, request, url, config_JSON);
+                        const 完整优选IP = await 获取Mihomo优选IP(env, request, mihomoURL, config_JSON);
                         if (mihomo调试) {
-                            return new Response(JSON.stringify(生成MihomoDebug统计(完整优选IP), null, 2), {
+                            return new Response(JSON.stringify(生成MihomoDebug统计(完整优选IP, 获取Mihomo地区(mihomoURL)), null, 2), {
                                 status: 200,
                                 headers: { "content-type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
                             });
@@ -1567,6 +1569,26 @@ const MIHOMO优选源列表 = [
     { name: 'mia-bestcf', url: 'https://bestcf.pages.dev/xinyitang3/ipv4.txt', parser: 'api', limit: 20 },
 ];
 
+const MIHOMO地区优选源列表 = {
+    tw: [
+        { name: 's5gy-tw', url: 'https://bestcf.pages.dev/s5gy/tw.txt', parser: 'api', limit: 300 },
+        { name: 'tiancheng-tw', url: 'https://bestcf.pages.dev/tiancheng/tw.txt', parser: 'api', limit: 300 },
+    ],
+};
+
+const MIHOMO地区别名 = {
+    taiwan: 'tw',
+    'cn-tw': 'tw',
+    '台湾': 'tw',
+    '台灣': 'tw',
+    '中国台湾': 'tw',
+    '中國台灣': 'tw',
+};
+
+const MIHOMO地区匹配词 = {
+    tw: ['tw', 'taiwan', '台湾', '台灣', '宝岛', '寶島'],
+};
+
 const MIHOMO优选域名列表 = [
     { name: 'domain-youxuan-090227', hostname: 'youxuan.cf.090227.xyz' },
     { name: 'domain-bestcf-030101', hostname: 'bestcf.030101.xyz' },
@@ -1586,7 +1608,8 @@ const MIHOMO自定义优选单源上限 = 300;
 function 生成Mihomo响应缓存KEY(url, host) {
     const 请求数量 = url.searchParams.has('count') ? parseInt(url.searchParams.get('count'), 10) : null;
     const countKey = Number.isFinite(请求数量) && 请求数量 > 0 ? String(请求数量) : 'all';
-    return new Request(`https://mihomo-provider-cache.local/${encodeURIComponent(host)}/${countKey}`);
+    const regionKey = 获取Mihomo地区(url) || 'global';
+    return new Request(`https://mihomo-provider-cache.local/${encodeURIComponent(host)}/${regionKey}/${countKey}`);
 }
 
 async function 获取Mihomo优选IP(env, request, url, config_JSON) {
@@ -1595,7 +1618,10 @@ async function 获取Mihomo优选IP(env, request, url, config_JSON) {
     const 配置数量 = parseInt(config_JSON.优选订阅生成?.本地IP库?.随机数量 || 1024, 10);
     const 默认数量 = Math.max(1024, Number.isFinite(配置数量) ? 配置数量 : 1024);
     const 目标数量 = Math.max(1, Math.min(数量上限 || 默认数量, 8192));
-    const cacheKey = new Request('https://mihomo-preferred-cache.local/cf-ips-v1');
+    const 地区 = 获取Mihomo地区(url);
+    const 地区缓存后缀 = 地区 || 'global';
+    const cacheKey = new Request(`https://mihomo-preferred-cache.local/cf-ips-v1/${地区缓存后缀}`);
+    const kvCacheKey = 地区 ? `${MIHOMO优选缓存KEY}_${地区}` : MIHOMO优选缓存KEY;
     const 跳过优选缓存 = url.searchParams.get('refresh') === '1' || url.searchParams.get('debug') === '1';
 
     if (!跳过优选缓存) {
@@ -1603,7 +1629,7 @@ async function 获取Mihomo优选IP(env, request, url, config_JSON) {
             const cached = await caches.default.match(cacheKey);
             if (cached) {
                 const cachedIPs = await cached.json();
-                const 结果 = await 补足Mihomo优选IP(cachedIPs, 目标数量, request);
+                const 结果 = await 补足Mihomo优选IP(cachedIPs, 目标数量, request, 地区);
                 if (结果.length > 0) return 结果;
             }
         } catch (error) {
@@ -1611,26 +1637,26 @@ async function 获取Mihomo优选IP(env, request, url, config_JSON) {
         }
     }
 
-    const 在线优选IP = 去重Mihomo优选IP((await 读取Mihomo自定义优选源(env)).concat(await 拉取Mihomo优选源()));
+    const 在线优选IP = 去重Mihomo优选IP(过滤Mihomo地区IP((await 读取Mihomo自定义优选源(env)).concat(await 拉取Mihomo优选源(地区)), 地区));
     if (在线优选IP.length > 0) {
         const response = new Response(JSON.stringify(在线优选IP), {
             headers: { 'Cache-Control': `public, max-age=${MIHOMO优选缓存秒}` }
         });
         try { await caches.default.put(cacheKey, response.clone()); } catch (error) { console.error(`写入mihomo优选热缓存失败: ${error.message}`); }
         try {
-            if (env.KV && typeof env.KV.put === 'function') await env.KV.put(MIHOMO优选缓存KEY, JSON.stringify(在线优选IP));
+            if (env.KV && typeof env.KV.put === 'function') await env.KV.put(kvCacheKey, JSON.stringify(在线优选IP));
         } catch (error) {
             console.error(`写入mihomo优选last-good失败: ${error.message}`);
         }
-        return await 补足Mihomo优选IP(在线优选IP, 目标数量, request);
+        return await 补足Mihomo优选IP(在线优选IP, 目标数量, request, 地区);
     }
 
     try {
         if (env.KV && typeof env.KV.get === 'function') {
-            const lastGood = await env.KV.get(MIHOMO优选缓存KEY);
+            const lastGood = await env.KV.get(kvCacheKey);
             if (lastGood) {
                 const lastGoodIPs = JSON.parse(lastGood);
-                const 结果 = await 补足Mihomo优选IP(lastGoodIPs, 目标数量, request);
+                const 结果 = await 补足Mihomo优选IP(lastGoodIPs, 目标数量, request, 地区);
                 if (结果.length > 0) return 结果;
             }
         }
@@ -1638,11 +1664,13 @@ async function 获取Mihomo优选IP(env, request, url, config_JSON) {
         console.error(`读取mihomo优选last-good失败: ${error.message}`);
     }
 
+    if (地区) return [];
     return (await 生成随机IP(request, 目标数量, 443, 'CF-CIDR-random'))[0];
 }
 
-async function 补足Mihomo优选IP(list, targetCount, request) {
+async function 补足Mihomo优选IP(list, targetCount, request, 地区 = '') {
     let merged = 去重Mihomo优选IP(限制Mihomo数量(list, targetCount));
+    if (地区) return merged;
     for (let i = 0; merged.length < targetCount && i < 4; i++) {
         const missing = targetCount - merged.length;
         const randomIPs = (await 生成随机IP(request, Math.ceil(missing * 1.5), 443, 'CF-CIDR-random'))[0];
@@ -1679,14 +1707,15 @@ async function 读取Mihomo自定义优选源(env) {
     return 去重Mihomo优选IP(results);
 }
 
-async function 拉取Mihomo优选源() {
-    const 源任务 = MIHOMO优选源列表.map(async (source) => {
+async function 拉取Mihomo优选源(地区 = '') {
+    const sourceList = 地区 && MIHOMO地区优选源列表[地区] ? MIHOMO地区优选源列表[地区] : MIHOMO优选源列表;
+    const 源任务 = sourceList.map(async (source) => {
         const results = [];
         try {
             if (source.parser === 'api') {
                 const [优选API的IP] = await 请求优选API([source.url], '443', 3000);
                 for (const item of 优选API的IP) {
-                    const parsed = 标准化Mihomo优选IP(String(item).split('#')[0], source.name);
+                    const parsed = 标准化Mihomo优选IP(String(item), source.name);
                     if (parsed) results.push(parsed);
                 }
             } else {
@@ -1708,7 +1737,7 @@ async function 拉取Mihomo优选源() {
         }
         return 限制Mihomo数量(去重Mihomo优选IP(results), source.limit);
     });
-    const 域名源任务 = MIHOMO优选域名列表.map(async (source) => {
+    const 域名源任务 = 地区 ? [] : MIHOMO优选域名列表.map(async (source) => {
         return await 解析Mihomo优选域名(source);
     });
     const settled = await Promise.allSettled(源任务.concat(域名源任务));
@@ -1769,19 +1798,46 @@ async function 解析Mihomo优选域名(source) {
     return results;
 }
 
+function 获取Mihomo地区(url) {
+    const raw = (url.searchParams.get('region') || url.searchParams.get('country') || url.searchParams.get('loc') || url.searchParams.get('area') || '').trim();
+    if (!raw) return '';
+    const normalized = raw.toLowerCase();
+    return MIHOMO地区别名[normalized] || normalized;
+}
+
+function 过滤Mihomo地区IP(list, 地区 = '') {
+    if (!地区 || !MIHOMO地区匹配词[地区]) return list;
+    const keywords = MIHOMO地区匹配词[地区];
+    return list.filter(item => {
+        const text = decodeURIComponent(String(item || '')).toLowerCase();
+        return keywords.some(keyword => text.includes(keyword.toLowerCase()));
+    });
+}
+
 function 标准化Mihomo优选IP(token, sourceName) {
-    const [addressPart, remarkPart] = token.split('#');
+    const raw = String(token || '');
+    const hashIndex = raw.indexOf('#');
+    const addressPart = hashIndex > -1 ? raw.slice(0, hashIndex) : raw;
+    const remarkPart = hashIndex > -1 ? raw.slice(hashIndex + 1) : '';
     let address = addressPart.trim();
+    let port = '443';
     if (!address) return null;
-    if (address.startsWith('[') && address.includes(']:')) address = address.slice(1, address.indexOf(']:'));
+    if (address.startsWith('[') && address.includes(']:')) {
+        port = address.slice(address.indexOf(']:') + 2).trim() || port;
+        address = address.slice(1, address.indexOf(']:'));
+    }
     else if (address.startsWith('[') && address.endsWith(']')) address = address.slice(1, -1);
     else if ((address.match(/:/g) || []).length === 1) {
         const parts = address.split(':');
-        if (/^\d+$/.test(parts[1])) address = parts[0];
+        if (/^\d+$/.test(parts[1])) {
+            address = parts[0];
+            port = parts[1];
+        }
     }
     if (!是有效IPv4(address)) return null;
+    if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) port = '443';
     const remark = encodeURIComponent((remarkPart || sourceName).replace(/[\r\n]/g, ' ').trim());
-    return `${address}:443#${remark}`;
+    return `${address}:${port}#${remark}`;
 }
 
 function 是有效IPv4(address) {
@@ -1862,8 +1918,8 @@ function 生成MihomoProvider(地址列表, config_JSON, host) {
     return lines.join('\n') + '\n';
 }
 
-function 生成MihomoDebug统计(地址列表) {
-    const stats = { total: 地址列表.length, preferred: 0, random: 0, categories: {}, remarks: {}, samples: 地址列表.slice(0, 20) };
+function 生成MihomoDebug统计(地址列表, 地区 = '') {
+    const stats = { total: 地址列表.length, region: 地区 || 'global', preferred: 0, random: 0, categories: {}, remarks: {}, samples: 地址列表.slice(0, 20) };
     for (const item of 地址列表) {
         const remark = decodeURIComponent(String(item).split('#')[1] || 'unknown').trim();
         const category = remark === 'CF-CIDR-random' ? 'random' :
@@ -1982,19 +2038,31 @@ async function 请求优选API(urls, 默认端口 = '443', 超时时间 = 3000) 
             const isCSV = lines.length > 1 && lines[0].includes(',');
             const IPV6_PATTERN = /^[^\[\]]*:[^\[\]]*:[^\[\]]/;
             if (!isCSV) {
+                const looksLikeAddress = (hostPart) => {
+                    const cleanHost = hostPart.replace(/^\[/, '').replace(/\](?::\d+)?$/, '').replace(/:\d+$/, '');
+                    return 是有效IPv4(cleanHost) || IPV6_PATTERN.test(cleanHost) || /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(cleanHost);
+                };
+                const addAddress = (hostPart, remark = '') => {
+                    hostPart = hostPart.trim();
+                    if (!looksLikeAddress(hostPart)) return false;
+                    let hasPort = false;
+                    if (hostPart.startsWith('[')) {
+                        hasPort = /\]:(\d+)$/.test(hostPart);
+                    } else {
+                        const colonIndex = hostPart.lastIndexOf(':');
+                        hasPort = colonIndex > -1 && /^\d+$/.test(hostPart.substring(colonIndex + 1));
+                    }
+                    const port = new URL(url).searchParams.get('port') || 默认端口;
+                    results.add(hasPort ? `${hostPart}${remark}` : `${hostPart}:${port}${remark}`);
+                    return true;
+                };
                 lines.forEach(line => {
+                    const lineHashIndex = line.indexOf('#');
+                    if (lineHashIndex > -1 && addAddress(line.substring(0, lineHashIndex), line.substring(lineHashIndex))) return;
                     line.split(/[,\s]+/).filter(Boolean).forEach(token => {
                         const hashIndex = token.indexOf('#');
                         const [hostPart, remark] = hashIndex > -1 ? [token.substring(0, hashIndex), token.substring(hashIndex)] : [token, ''];
-                        let hasPort = false;
-                        if (hostPart.startsWith('[')) {
-                            hasPort = /\]:(\d+)$/.test(hostPart);
-                        } else {
-                            const colonIndex = hostPart.lastIndexOf(':');
-                            hasPort = colonIndex > -1 && /^\d+$/.test(hostPart.substring(colonIndex + 1));
-                        }
-                        const port = new URL(url).searchParams.get('port') || 默认端口;
-                        results.add(hasPort ? token : `${hostPart}:${port}${remark}`);
+                        addAddress(hostPart, remark);
                     });
                 });
             } else {

@@ -11,6 +11,7 @@ This package is a cleaned publishing copy. It contains no Cloudflare account ID,
 - `wrangler.toml.example` - Wrangler deploy template.
 - `config.example.json` - Optional KV `config.json` example.
 - `ADD.example.txt` - Optional KV `ADD.txt` preferred-IP source example.
+- `ADD.taiwan.example.txt` - Optional Taiwan preferred-IP source example.
 - `LICENSE` - Upstream Apache-2.0 license.
 
 ## Required Cloudflare bindings
@@ -99,6 +100,9 @@ Endpoints:
 
 ```text
 https://<worker-host>/mihomo?token=<subscription-token>&count=100
+https://<worker-host>/mihomo?token=<subscription-token>&count=100&region=tw
+https://<worker-host>/mihomo/tw?token=<subscription-token>&count=100
+https://<worker-host>/clash/tw?token=<subscription-token>&count=100
 https://<worker-host>/sub?token=<subscription-token>
 ```
 
@@ -106,14 +110,64 @@ Debug endpoint:
 
 ```text
 https://<worker-host>/mihomo?token=<subscription-token>&count=1024&debug=1&refresh=1
+https://<worker-host>/mihomo?token=<subscription-token>&count=100&region=tw&debug=1&refresh=1
+https://<worker-host>/mihomo/tw?token=<subscription-token>&count=100&debug=1&refresh=1
 ```
 
 Expected debug fields:
 
 - `total` - returned node count.
+- `region` - requested region, or `global`.
 - `preferred` - nodes from preferred sources.
 - `random` - Cloudflare CIDR random-fill nodes.
 - `categories` / `remarks` - source breakdown.
+
+## Taiwan preferred nodes
+
+`/mihomo` supports a Taiwan-only preferred source mode:
+
+```text
+https://<worker-host>/mihomo?token=<subscription-token>&count=100&region=tw&refresh=1
+```
+
+Aliases also work:
+
+```text
+country=tw
+loc=tw
+area=tw
+region=taiwan
+region=台湾
+```
+
+This mode uses Taiwan-labeled public preferred-IP sources and preserves their ports. It does not add random Cloudflare CIDR fill, because random anycast IPs cannot guarantee a Taiwan route. If the upstream Taiwan lists are short, the returned count may be lower than `count`.
+
+`/mihomo/tw`, `/mihomo-tw`, `/clash/tw`, and `/clash-tw` are shortcut paths for the same Taiwan-only provider. They keep the normal `/mihomo` provider unchanged.
+
+Example Clash/Mihomo proxy providers:
+
+```yaml
+proxy-providers:
+  cf-auto:
+    type: http
+    url: "https://<worker-host>/mihomo?token=<subscription-token>&count=100"
+    interval: 3600
+    path: ./providers/cf-auto.yaml
+    health-check:
+      enable: true
+      interval: 600
+      url: https://www.gstatic.com/generate_204
+
+  cf-tw:
+    type: http
+    url: "https://<worker-host>/mihomo/tw?token=<subscription-token>&count=100"
+    interval: 3600
+    path: ./providers/cf-tw.yaml
+    health-check:
+      enable: true
+      interval: 600
+      url: https://www.gstatic.com/generate_204
+```
 
 ## Preferred IP sources
 
